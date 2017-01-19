@@ -8,9 +8,13 @@ import multiprocessing as mp
 import json 
 import time
 
-__all__ = ["varType", "entryReader", "parmap", "show", "transpose"]
+__all__ = ["configGetter", "varType", "entryReader", "parmap", "show", "transpose"]
 
 POOL_SIZE = mp.cpu_count()
+
+__config__ = json.load( open("./config.json") )
+def configGetter(key):
+	return __config__[key]
 
 def varType(d):
 	typeList = [int, float, str, dict, list]
@@ -25,29 +29,36 @@ def entryReader(string):
 	except:
 		return json.loads( string.replace("'",'"') )
 
-def spawn(f, qin, qout):
+def spawn(f, qin, qout, qcount):
 	while True:
 		x = qin.get()
 		if x is None:
 			break
 		qout.put_nowait( f(x) )
+		qcount.put_nowait(1)
 
 def parmap(target, inputs, probar=True):
 
 	pbar = ProgressBar(widgets=[Percentage(), Bar(), Timer()], max_value=len(inputs)).start()
+	pbar.update(0)
 	isfinished = False
-	def updating():
-		while not(isfinished):
-			pbar.update()
-			time.sleep(1)
-		pbar.finish()
-	Thread(target=updating).start()
-
-
+	
 	qin = mp.Queue(1)
 	qout = mp.Queue()
-	proc = [ mp.Process(target=spawn, args=(target, qin, qout)) for i in range(POOL_SIZE) ]
+	qcount = mp.Queue()
+	proc = [ mp.Process(target=spawn, args=(target, qin, qout, qcount)) for i in range(POOL_SIZE) ]
 	
+	
+	def updating():
+		counter = 0
+		while not( isfinished or counter == len(inputs) ):
+			if not(qcount.empty()):
+				qcount.get()
+				counter += 1
+			pbar.update(counter)
+			time.sleep(1)
+	Thread(target=updating).start()
+
 	for p in  proc:
 		p.daemon = True
 		p.start()
@@ -58,8 +69,11 @@ def parmap(target, inputs, probar=True):
 	ret = []
 	for i in range(len(inputs)):
 		ret.append( qout.get() )
-		pbar.update(i+1)
 
+	pbar.finish()
+
+	qout.close()
+	qin.close()
 	[ p.join() for p in proc ]
 
 	isfinished = True

@@ -7,7 +7,7 @@ import multiprocessing as mp
 
 __all__ = ["tables", "Scan", "TableScan"]
 
-__base_dir__ = "../"
+__base_dir__ = configGetter("data_dir")
 
 # engine init
 def init():
@@ -22,8 +22,6 @@ def init():
 __meta__ = init()
 def tables():
 	return list(__meta__.keys())
-
-
 
 class Scan():
 	def __init__(self, obj):
@@ -103,17 +101,12 @@ class Scan():
 			show(self, limit, truncate)
 		else:
 			data = []
-			for i in range(limit):
+			for i in range(min(limit, self.limitCount)):
 				data.append(next(self))
 			show( transpose(data) )
 
 	def collect(self):
-		# batch processing -> multiprocessing
-		# try:
 		return self.target.async(self.__transform__)
-		# except:
-		# 	print("enumerating...")
-		# 	return list(self)
 
 
 class TableScan():
