@@ -3,6 +3,9 @@
 from tabulate import tabulate
 from progressbar import ProgressBar, Percentage, Bar, Timer
 from threading import Thread
+from random import random
+from copy import deepcopy
+import os
 
 import multiprocessing as mp
 import json 
@@ -12,8 +15,11 @@ __all__ = ["configGetter", "varType", "entryReader", "parmap", "show", "transpos
 
 POOL_SIZE = mp.cpu_count()
 
-__config__ = json.load( open("./config.json") )
+__config__ = None
 def configGetter(key):
+	global __config__
+	if __config__ == None:
+		__config__ = json.load( open("./config.json") )
 	return __config__[key]
 
 def varType(d):
@@ -29,25 +35,35 @@ def entryReader(string):
 	except:
 		return json.loads( string.replace("'",'"') )
 
-def spawn(f, qin, qout, qcount):
+def spawn(f, qin, qout, qcount, tmpEnable, i):
+	import pickle
+	tempfnbase = configGetter("temp_dir")+ str( int(random()*1000000) ) + "-" + str(i) + "-"
+	c = 0
+	
 	while True:
 		x = qin.get()
-		if x is None:
+		if x == None:
 			break
-		qout.put_nowait( f(x) )
+		
+		if tmpEnable:
+			with open( tempfnbase + str(c), "wb" ) as fw:
+				pickle.dump( f(x), fw )
+				fw.close()
+			qout.put_nowait( tempfnbase + str(c) )
+		else:
+			qout.put_nowait( f(x) )
 		qcount.put_nowait(1)
+		c += 1
 
-def parmap(target, inputs, probar=True):
-
+def parmap(target, inputs, probar=True, tmpEnable=False):
 	pbar = ProgressBar(widgets=[Percentage(), Bar(), Timer()], max_value=len(inputs)).start()
 	pbar.update(0)
 	isfinished = False
 	
 	qin = mp.Queue(1)
-	qout = mp.Queue()
+	qout = mp.JoinableQueue()
 	qcount = mp.Queue()
-	proc = [ mp.Process(target=spawn, args=(target, qin, qout, qcount)) for i in range(POOL_SIZE) ]
-	
+	proc = [ mp.Process(target=spawn, args=(deepcopy(target), qin, qout, qcount, tmpEnable, i)) for i in range(POOL_SIZE) ]
 	
 	def updating():
 		counter = 0
@@ -59,26 +75,36 @@ def parmap(target, inputs, probar=True):
 			time.sleep(1)
 	Thread(target=updating).start()
 
-	for p in  proc:
+	for p in proc:
 		p.daemon = True
 		p.start()
 
 	[ qin.put(x) for x in inputs ]
 	[ qin.put(None) for _ in range(POOL_SIZE) ]
-	
-	ret = []
-	for i in range(len(inputs)):
-		ret.append( qout.get() )
+		
+	if tmpEnable == False:
+		def ret():
+			for i in range(len(inputs)):
+				yield qout.get()
+			qout.close()
+			[ p.join() for p in proc ]
+	else:
+		fns = []
+		for i in range(len(inputs)):
+			fns.append( qout.get() )
+		qout.close()
+		[ p.join() for p in proc ]
+		def ret():
+			for fn in fns:
+				yield pickle.load( open(fn, "rb") )
+				os.remove( fn )
 
 	pbar.finish()
-
-	qout.close()
 	qin.close()
-	[ p.join() for p in proc ]
 
 	isfinished = True
 
-	return ret
+	return ret()
 
 def show(data, limit = False, truncate = False, toPrint = True):
 	if limit == False:
@@ -115,5 +141,4 @@ def transpose(data):
 			if not(k in trans):
 				trans[k] = []
 			trans[k].append( d[k] )
-
 	return iter([ { **{"Key": k}, **dict(zip(range(len(trans[k])), trans[k])) } for k in trans ])

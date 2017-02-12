@@ -2,10 +2,14 @@
 
 from os import listdir
 import json
+import sys
 from util import *
 
 # table list
 tableList = [ d for d in listdir("../") if d.split("_")[0]=="all" ]
+if len(sys.argv) > 1:
+	tableList = sys.argv[1:]
+
 
 for tn in tableList:
 	print("parsing " + tn + "...")

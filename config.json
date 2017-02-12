@@ -1,5 +1,6 @@
 {
 	"data_dir": "../",
+	"temp_dir": "./tmp/",
 	"format": "json",
 	"separator": 29
 }

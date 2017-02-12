@@ -80,7 +80,10 @@ class Scan():
 		assert self.lock == False
 		if isinstance(args[0], list):
 			args = args[0]
-		self.cols = [ c for c in self.cols if c in args ]
+		if args[0] == "-":
+			self.cols = [ c for c in self.cols if not(c in args) ]
+		else:
+			self.cols = [ c for c in self.cols if c in args ]
 
 		return self
 
@@ -101,12 +104,16 @@ class Scan():
 			show(self, limit, truncate)
 		else:
 			data = []
-			for i in range(min(limit, self.limitCount)):
-				data.append(next(self))
-			show( transpose(data) )
+			for i in range(max(limit, self.limitCount)):
+				data.append( self.__next__() ) 
+			show( transpose(data), limit=False, truncate=truncate )
 
-	def collect(self):
-		return self.target.async(self.__transform__)
+	def collect(self, tmpEnable=False):
+		# try:
+		return self.target.async(self.__transform__, tmpEnable)
+		# except:
+			# return [e for e in self]
+		
 
 
 class TableScan():
@@ -114,7 +121,7 @@ class TableScan():
 		# read meta and file
 		assert tn in __meta__
 		self.meta = __meta__[tn]
-		
+
 		self.lock = False
 		self.cols = self.meta["schema"].copy()
 
@@ -144,7 +151,7 @@ class TableScan():
 
 		return entryReader( self.cfp.readline() )
 
-	def async(self, operation):
+	def async(self, operation, tmpEnable):
 		def run(fn):
 			output = []
 			with open(fn) as fp:
@@ -155,11 +162,13 @@ class TableScan():
 						output.append( line )
 			return output
 
-		ret = []
-		for res in parmap(target=run, inputs=[ self.meta["dir_prefix"] + fn for fn in self.meta["fns"] ] ):
-			ret += res
+		result = parmap(target=run, inputs=[ self.meta["dir_prefix"] + fn for fn in self.meta["fns"] ], tmpEnable=tmpEnable )
+		def ret():
+			for res in result:
+				for d in res:
+					yield d
 
-		return ret
+		return ret()
 
 
 	def keys(self):
